@@ -56,6 +56,9 @@
     font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     background: #fff; color: #111;
   }
+  /* Hide everything until we know whether there is a target URL */
+  body.loading-target > * { display: none !important; }
+
   #bar {
     position: sticky; top: 0; z-index: 10; flex: 0 0 auto;
     display: flex; gap: 8px; align-items: center;
@@ -126,10 +129,11 @@
   }
 </style>
 <script>
-  // Show guide/note only on the bare main domain (no query string)
-  if (!location.search || location.search === '?') {
+  // Immediately hide all UI if a query URL is present so nothing flashes before document.write
+  if (location.search && location.search !== '?') {
+    document.documentElement.classList.add('has-target');
     document.addEventListener('DOMContentLoaded', function () {
-      document.body.classList.add('home-mode');
+      document.body.classList.add('loading-target');
     });
   }
 </script>
@@ -169,12 +173,20 @@
     var errorEl = document.getElementById('error');
 
     var hasQueryParam = Boolean(location.search && location.search !== '?');
-    if (!hasQueryParam) {
+    if (hasQueryParam) {
+      document.body.classList.add('loading-target');
+    } else {
+      document.body.classList.remove('loading-target');
       document.body.classList.add('home-mode');
+    }
+
+    function revealUI() {
+      document.body.classList.remove('loading-target');
     }
 
     function setStatus(message) { statusEl.textContent = message || ''; }
     function showError(message) {
+      revealUI();
       errorEl.textContent = '⚠ ' + message;
       errorEl.classList.add('show');
     }
@@ -402,7 +414,6 @@
       }
       url = targetUrl;
       previewBtn.disabled = true;
-      setStatus('Fetching HTML preview…');
       fetchProxy(bust(targetUrl), null, 0)
         .then(loadHTML)
         .catch(function (error) {
@@ -426,6 +437,8 @@
 
     if (url && url.indexOf(location.hostname) < 0) {
       runPreview(url);
+    } else {
+      revealUI();
     }
   })();
   </script>
