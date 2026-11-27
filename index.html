@@ -27,19 +27,18 @@
 <link rel="icon" href="https://raw.githubusercontent.com/igiteam/htmlpreview/refs/heads/master/htmlpreview.png">
 <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/igiteam/htmlpreview/refs/heads/master/htmlpreview.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="HTML Preview">
-  
+
 <script>
 // ---- Hard cache reset on every load ----
 (function () {
-  // 1. Kill any service workers that might be caching this origin
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.getRegistrations().then(function (regs) {
       regs.forEach(function (r) { r.unregister(); });
     });
   }
-  // 2. Wipe Cache Storage
   if (window.caches && caches.keys) {
     caches.keys().then(function (keys) {
       keys.forEach(function (k) { caches.delete(k); });
@@ -50,7 +49,7 @@
 
 <style>
   :root { color-scheme: light dark; }
-  * { box-sizing: border-box; }
+  *, *::before, *::after { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; height: 100%; }
   body {
     display: flex; flex-direction: column;
@@ -83,6 +82,9 @@
     color: #cf222e; white-space: pre-wrap;
   }
   #error.show { display: block; }
+  #preview-note, #guide { display: none; }
+  body.home-mode #preview-note,
+  body.home-mode #guide { display: block; }
   #preview-note {
     flex: 0 0 auto; padding: 5px 8px; color: #666; background: #fafafa;
     border-bottom: 1px solid #ddd; font-size: 11px;
@@ -123,6 +125,14 @@
     button { padding: 5px 8px; }
   }
 </style>
+<script>
+  // Show guide/note only on the bare main domain (no query string)
+  if (!location.search || location.search === '?') {
+    document.addEventListener('DOMContentLoaded', function () {
+      document.body.classList.add('home-mode');
+    });
+  }
+</script>
 </head>
 <body>
   <form id="bar">
@@ -158,6 +168,11 @@
     var statusEl = document.getElementById('status');
     var errorEl = document.getElementById('error');
 
+    var hasQueryParam = Boolean(location.search && location.search !== '?');
+    if (!hasQueryParam) {
+      document.body.classList.add('home-mode');
+    }
+
     function setStatus(message) { statusEl.textContent = message || ''; }
     function showError(message) {
       errorEl.textContent = '⚠ ' + message;
@@ -184,15 +199,16 @@
       return normalizeTargetUrl(q);
     };
 
-    // Keep shareable URL and Open Raw button synced with input
     function syncInputState() {
       var trimmed = fileInput.value.trim();
       rawBtn.disabled = !trimmed;
       var pageUrl = new URL(window.location.href);
       if (trimmed) {
         pageUrl.search = '?' + encodeURIComponent(trimmed);
+        document.body.classList.remove('home-mode');
       } else {
         pageUrl.search = '';
+        document.body.classList.add('home-mode');
       }
       history.replaceState({}, '', pageUrl.pathname + pageUrl.search + pageUrl.hash);
     }
@@ -204,7 +220,6 @@
       if (resolved) window.open(resolved, '_blank', 'noopener,noreferrer');
     });
 
-    // ---- Add cache-bust param to raw GitHub fetches so re-preview is always fresh ----
     var bust = function (u) {
       var sep = u.indexOf('?') > -1 ? '&' : '?';
       return u + sep + '_cb=' + Date.now();
