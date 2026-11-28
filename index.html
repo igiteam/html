@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>GitHub &amp; BitBucket HTML Preview</title>
 
 <!-- General & Color Scheme -->
@@ -234,9 +237,24 @@
       if (resolved) window.open(resolved, '_blank', 'noopener,noreferrer');
     });
 
-    var bust = function (u) {
+    // Convert raw.githubusercontent.com URLs to uncached GitHub Contents API URLs
+    var toUncachedUrl = function (u) {
+      var clean = u.split('#')[0].split('?')[0];
+      var m = clean.match(/^https?:\/\/raw\.githubusercontent\.com\/([^\/]+)\/([^\/]+)\/(?:refs\/heads\/)?([^\/]+)\/(.+)$/i);
+      if (m) {
+        var owner = m[1], repo = m[2], branch = m[3], path = m[4];
+        return {
+          apiUrl: 'https://api.github.com/repos/' + owner + '/' + repo + '/contents/' + path + '?ref=' + encodeURIComponent(branch) + '&_cb=' + Date.now(),
+          fallbackUrl: clean + '?_cb=' + Date.now(),
+          isGitHubApi: true
+        };
+      }
       var sep = u.indexOf('?') > -1 ? '&' : '?';
-      return u + sep + '_cb=' + Date.now();
+      return {
+        apiUrl: null,
+        fallbackUrl: u + sep + '_cb=' + Date.now(),
+        isGitHubApi: false
+      };
     };
 
     var url = parseTargetUrl();
@@ -245,14 +263,34 @@
       rawBtn.disabled = false;
     }
 
-    var fetchProxy = function (targetUrl, options, i) {
+    var fetchUncached = function (targetUrl) {
+      var info = toUncachedUrl(targetUrl);
+
+      // 1. Try uncached GitHub REST API first (bypasses Fastly's 5-20 min CDN cache)
+      if (info.isGitHubApi && info.apiUrl) {
+        return fetch(info.apiUrl, {
+          cache: 'no-store',
+          headers: { 'Accept': 'application/vnd.github.raw+json' }
+        }).then(function (res) {
+          if (!res.ok) throw new Error('GitHub API status ' + res.status);
+          return res.text();
+        }).catch(function () {
+          // Fall back to raw URL + proxy if rate-limited (60 req/hr unauthenticated)
+          return fetchDirectOrProxy(info.fallbackUrl, 0);
+        });
+      }
+
+      return fetchDirectOrProxy(info.fallbackUrl, 0);
+    };
+
+    var fetchDirectOrProxy = function (targetUrl, i) {
       var proxy = ['', 'https://api.codetabs.com/v1/proxy/?quest='];
-      return fetch(proxy[i] + targetUrl, options).then(function (res) {
+      return fetch(proxy[i] + targetUrl, { cache: 'no-store' }).then(function (res) {
         if (!res.ok) throw new Error('Cannot load ' + targetUrl + ': ' + res.status + ' ' + res.statusText);
         return res.text();
       }).catch(function (error) {
         if (i === proxy.length - 1) throw error;
-        return fetchProxy(targetUrl, options, i + 1);
+        return fetchDirectOrProxy(targetUrl, i + 1);
       });
     };
 
@@ -263,7 +301,6 @@
       (document.head || document.documentElement).appendChild(s);
     };
 
-    // Execute scripts sequentially in exact document order so external libraries (like Tailwind) finish before dependent inline scripts run
     var runScriptsSequentially = function (scriptItems, index, done) {
       if (index >= scriptItems.length) {
         if (done) done();
@@ -276,7 +313,7 @@
         var resolvedSrc = item.src;
         try { resolvedSrc = new URL(item.src, url).href; } catch (e) {}
         if (isRepoSourceUrl(resolvedSrc)) {
-          fetchProxy(bust(resolvedSrc), null, 0).then(function (code) {
+          fetchUncached(resolvedSrc).then(function (code) {
             var s = document.createElement('script');
             s.textContent = code;
             (document.body || document.documentElement).appendChild(s);
@@ -333,11 +370,10 @@
         try { resolvedCss = new URL(href, url).href; } catch (e) {}
         if (isRepoSourceUrl(resolvedCss)) {
           links[i].parentNode.removeChild(links[i]);
-          cssPromises.push(fetchProxy(bust(resolvedCss), null, 0).then(loadCSS).catch(function () {}));
+          cssPromises.push(fetchUncached(resolvedCss).then(loadCSS).catch(function () {}));
         }
       }
 
-      // Collect deferred scripts from the parsed preview HTML
       var deferredScripts = window.__SDHD_DEFERRED_SCRIPTS__ || [];
 
       Promise.all(cssPromises).then(function () {
@@ -436,7 +472,6 @@
 
       scripts.forEach(function (sc) {
         var type = (sc.getAttribute('type') || '').trim().toLowerCase();
-        // Skip non-JS data/template blocks
         if (type && type !== 'text/javascript' && type !== 'application/javascript' && type !== 'module') {
           return;
         }
@@ -491,7 +526,7 @@
       }
       url = targetUrl;
       previewBtn.disabled = true;
-      fetchProxy(bust(targetUrl), null, 0)
+      fetchUncached(targetUrl)
         .then(loadHTML)
         .catch(function (error) {
           console.error(error);
